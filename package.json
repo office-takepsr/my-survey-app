@@ -8,13 +8,15 @@
     "start": "next start",
     "lint": "next lint"
   },
-  "dependencies": {
-    "next": "latest",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "@supabase/supabase-js": "^2.47.12",
-    "lucide-react": "^0.400.0"
-  },
+"dependencies": {
+  "next": "latest",
+  "react": "latest",
+  "react-dom": "latest",
+  "@supabase/supabase-js": "latest",
+  "tailwindcss": "3.4.1",
+  "postcss": "8",
+  "autoprefixer": "10"
+},
   "devDependencies": {
     "typescript": "^5",
     "@types/node": "^20",
