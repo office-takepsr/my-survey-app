@@ -1,10 +1,18 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    ignoreBuildErrors: true, // 型エラーを無視する
+    // ビルド時の型エラーを無視する
+    ignoreBuildErrors: true,
   },
   eslint: {
-    ignoreDuringBuilds: true, // 文法チェックを無視する
+    // ビルド時のESLintエラーを無視する
+    ignoreDuringBuilds: true,
+  },
+  // Turbopackの設定でビルドが止まるのを防ぐ（念のため）
+  experimental: {
+    turbo: {
+      // 必要に応じて設定
+    },
   },
 };
 
