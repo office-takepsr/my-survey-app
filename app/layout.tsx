@@ -1,3 +1,4 @@
+"use client"; // ← これを1行目に入れることで、読み込みの矛盾を解消します
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
