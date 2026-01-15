@@ -1,4 +1,6 @@
+// route.ts の冒頭部分
 import { NextResponse } from 'next/server';
+// ★波括弧 { } で囲んでインポートしているか確認してください
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 type MetaResponse = {
