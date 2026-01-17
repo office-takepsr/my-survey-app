@@ -1,28 +1,39 @@
 import SurveyForm from './SurveyForm';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { notFound } from 'next/navigation';
 
-// 1. API route.ts に書いていたロジックを直接ここに持ってくる（または別ファイルから呼ぶ）
-async function getSurveyData(surveyCode: string) {
+export default async function Page({ params }: { params: Promise<{ surveyCode: string }> }) {
+  const { surveyCode } = await params;
+
+  // --- 1. サーバーサイドで直接データを取得（fetchは使わない） ---
+  
+  // サーベイ基本情報
   const { data: survey } = await supabaseAdmin
     .from('surveys')
     .select('code, name, start_at, end_at, status')
     .eq('code', surveyCode)
     .single();
 
-  if (!survey) return null;
+  if (!survey) {
+    return notFound(); // 404ページを表示
+  }
 
+  // 部署一覧
   const { data: departments } = await supabaseAdmin
     .from('departments')
     .select('name')
     .eq('is_active', true)
     .order('sort_order', { ascending: true });
 
+  // 設問一覧
   const { data: questions } = await supabaseAdmin
     .from('questions')
     .select('question_code, scale, question_text, display_order')
     .eq('is_active', true)
     .order('display_order', { ascending: true });
 
+  // --- 2. データを整形 ---
+  
   const questionsByScale: any = { A: [], B: [], C: [], D: [], E: [], F: [] };
   questions?.forEach((q) => {
     if (questionsByScale[q.scale]) {
@@ -33,7 +44,7 @@ async function getSurveyData(surveyCode: string) {
     }
   });
 
-  return {
+  const meta = {
     survey,
     departments: departments || [],
     questionsByScale,
@@ -50,23 +61,17 @@ async function getSurveyData(surveyCode: string) {
       ],
     },
   };
-}
 
-// 2. Page本体
-export default async function Page({ params }: { params: Promise<{ surveyCode: string }> }) {
-  const { surveyCode } = await params;
-
-  // 重要：fetch は絶対に使わない！直接関数を呼ぶ
-  const meta = await getSurveyData(surveyCode);
-
-  if (!meta) {
-    return <div>サーベイが見つかりません</div>;
-  }
-
+  // --- 3. レンダリング ---
+  
   return (
     <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-      <h1>{meta.survey?.name}</h1>
-      {/* データを SurveyForm に渡す */}
+      <h1>{meta.survey?.name ?? 'サーベイ回答'}</h1>
+      <p style={{ color: '#555' }}>
+        実施期間：{new Date(meta.survey.start_at).toLocaleString('ja-JP')} 〜{' '}
+        {new Date(meta.survey.end_at).toLocaleString('ja-JP')}
+      </p>
+      {/* 取得したデータをそのまま Client Component へ渡す */}
       <SurveyForm surveyCode={surveyCode} meta={meta} />
     </main>
   );
