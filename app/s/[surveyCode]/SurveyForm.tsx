@@ -2,6 +2,11 @@
 
 import { useMemo, useState } from 'react';
 
+if (typeof window === 'undefined') {
+  // サーバーサイドでこのファイルが読み込まれた時に fetch を空関数にするなどの安全策
+  global.fetch = global.fetch || (() => Promise.reject(new Error("Server-side fetch inhibited")));
+}
+
 type Meta = {
   departments: { name: string }[];
   questionsByScale: Record<string, { question_code: string; question_text: string }[]>;
@@ -82,9 +87,7 @@ export default function SurveyForm({
         answers,
       };
 
-// onSubmit 関数の外（ファイルの上のほう、または onSubmit の直前）に移動
-const getBaseUrl = () => {
-  if (typeof window !== 'undefined') return ''; // ブラウザ実行なら相対パスでOK
+
   // Vercel環境用
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return 'http://localhost:3000';
