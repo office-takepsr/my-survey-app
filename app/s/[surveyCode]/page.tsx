@@ -1,31 +1,29 @@
 import SurveyForm from './SurveyForm';
+// APIの中身と同じ処理をする関数をインポート
+import { getSurveyMeta } from '@/lib/api-logic'; 
 
 export default async function Page({ params }: { params: Promise<{ surveyCode: string }> }) {
   const { surveyCode } = await params;
 
-  const base = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-  const res = await fetch(`${base}/api/surveys/${surveyCode}/meta`, { cache: 'no-store' });
+  // ❌ fetch は使わない
+  // const res = await fetch(`${base}/api/surveys/${surveyCode}/meta`, ...);
+  
+  // ✅ 直接ロジックを呼び出す（これが一番速くて安全）
+  try {
+    const meta = await getSurveyMeta(surveyCode);
 
-  if (!res.ok) {
-    const msg = res.status === 404 ? 'サーベイが見つかりません' : '読み込みに失敗しました';
+    if (!meta) {
+      return <main><h1>サーベイが見つかりません</h1></main>;
+    }
+
     return (
       <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-        <h1>サーベイ回答</h1>
-        <p>{msg}</p>
+        <h1>{meta.survey?.name ?? 'サーベイ回答'}</h1>
+        {/* ...中略... */}
+        <SurveyForm surveyCode={surveyCode} meta={meta} />
       </main>
     );
+  } catch (error) {
+    return <main><h1>読み込みに失敗しました</h1></main>;
   }
-
-  const meta = await res.json();
-
-  return (
-    <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-      <h1>{meta.survey?.name ?? 'サーベイ回答'}</h1>
-      <p style={{ color: '#555' }}>
-        実施期間：{new Date(meta.survey.start_at).toLocaleString('ja-JP')} 〜{' '}
-        {new Date(meta.survey.end_at).toLocaleString('ja-JP')}
-      </p>
-      <SurveyForm surveyCode={surveyCode} meta={meta} />
-    </main>
-  );
 }
