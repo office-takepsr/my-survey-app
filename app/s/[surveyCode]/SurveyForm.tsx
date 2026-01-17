@@ -82,19 +82,34 @@ export default function SurveyForm({
         answers,
       };
 
-// window が存在すればブラウザ、なければ Vercelの環境変数を使用
+// onSubmit 関数の外（ファイルの上のほう、または onSubmit の直前）に移動
 const getBaseUrl = () => {
-  if (typeof window !== 'undefined') return ''; // ブラウザなら相対パスでOK
-  if (process.env.NEXT_PUBLIC_VERCEL_URL) return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`;
+  if (typeof window !== 'undefined') return ''; // ブラウザ実行なら相対パスでOK
+  // Vercel環境用
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return 'http://localhost:3000';
 };
 
-// fetch部分
-const res = await fetch(`${getBaseUrl()}/api/surveys/${surveyCode}/submit`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payload),
-});
+async function onSubmit() {
+  setMessage(null);
+  const err = validate();
+  if (err) {
+    setMessage({ type: 'error', text: err });
+    return;
+  }
+
+  setSubmitting(true);
+  try {
+    // ... payloadの作成 ...
+
+    // fetchを実行
+    const res = await fetch(`${getBaseUrl()}/api/surveys/${surveyCode}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    // ... その後の処理 ...
 
       const data = await res.json().catch(() => ({}));
 
