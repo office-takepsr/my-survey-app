@@ -1,29 +1,28 @@
-import SurveyForm from './SurveyForm';
-import { getSurveyMeta } from '@/lib/getSurveyData'; // 上で作った関数をインポート
+import Link from 'next/link';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-export default async function Page({ params }: { params: Promise<{ surveyCode: string }> }) {
-  const { surveyCode } = await params;
-
-  // ★ fetch をやめて直接関数を呼ぶ！
-  const meta = await getSurveyMeta(surveyCode);
-
-  if (!meta) {
-    return (
-      <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-        <h1>サーベイが見つかりません</h1>
-      </main>
-    );
-  }
+export default async function HomePage() {
+  // ❌ fetch(`${base}/api/surveys`) は使わない
+  // ✅ 直接 Supabase から取得する
+  const { data: surveys } = await supabaseAdmin
+    .from('surveys')
+    .select('code, name')
+    .eq('status', 'open'); // 公開中のものだけ
 
   return (
-    <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-      <h1>{meta.survey?.name ?? 'サーベイ回答'}</h1>
-      <p style={{ color: '#555' }}>
-        実施期間：{new Date(meta.survey.start_at).toLocaleString('ja-JP')} 〜{' '}
-        {new Date(meta.survey.end_at).toLocaleString('ja-JP')}
+    <main style={{ padding: 24 }}>
+      <h1>Survey App</h1>
+      <ul>
+        {surveys?.map((s) => (
+          <li key={s.code}>
+            {/* Link を使ってもOKですが、まずは <a> で試すと確実です */}
+            <Link href={`/s/${s.code}`}>{s.name} ({s.code})</Link>
+          </li>
+        ))}
+      </ul>
+      <p style={{ marginTop: 20, color: '#666' }}>
+        例：<a href="/s/2026-02">/s/2026-02</a>
       </p>
-      {/* Client Component にデータを渡す */}
-      <SurveyForm surveyCode={surveyCode} meta={meta} />
     </main>
   );
 }
