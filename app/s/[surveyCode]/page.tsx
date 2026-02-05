@@ -1,47 +1,29 @@
 import SurveyForm from './SurveyForm';
-import { supabaseAdmin } from '@/lib/supabaseAdmin'; // supabaseAdminをインポート
-import { notFound } from 'next/navigation';
 
-export default async function Page({
-  params,
-}: {
-  params: Promise<{ surveyCode: string }>;
-}) {
+export default async function Page({ params }: { params: Promise<{ surveyCode: string }> }) {
   const { surveyCode } = await params;
 
-// APIのレスポンス形式に合わせて meta オブジェクトを作成
-  // Date型が含まれているとクライアントに渡す際にクラッシュするため、文字列に変換する
-  const meta = {
-    survey: {
-      ...survey,
-      start_at: new Date(survey.start_at).toISOString(),
-      end_at: new Date(survey.end_at).toISOString(),
-    }
-  };
+  const base = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+  const res = await fetch(`${base}/api/surveys/${surveyCode}/meta`, { cache: 'no-store' });
+
+  if (!res.ok) {
+    const msg = res.status === 404 ? 'サーベイが見つかりません' : '読み込みに失敗しました';
+    return (
+      <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
+        <h1>サーベイ回答</h1>
+        <p>{msg}</p>
+      </main>
+    );
+  }
+
+  const meta = await res.json();
 
   return (
     <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-      <h1>{survey.name ?? 'サーベイ回答'}</h1>
-      {/* ここでも Date に変換して表示 */}
+      <h1>{meta.survey?.name ?? 'サーベイ回答'}</h1>
       <p style={{ color: '#555' }}>
-        実施期間：{new Date(survey.start_at).toLocaleString('ja-JP')} 〜{' '}
-        {new Date(survey.end_at).toLocaleString('ja-JP')}
-      </p>
-      {/* プレーンなオブジェクトになった meta を渡す */}
-      <SurveyForm surveyCode={surveyCode} meta={meta} />
-    </main>
-  );
-}
-
-  // APIのレスポンス形式に合わせて meta オブジェクトを模倣
-  const meta = { survey };
-
-  return (
-    <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-      <h1>{survey.name ?? 'サーベイ回答'}</h1>
-      <p style={{ color: '#555' }}>
-        実施期間：{new Date(survey.start_at).toLocaleString('ja-JP')} 〜{' '}
-        {new Date(survey.end_at).toLocaleString('ja-JP')}
+        実施期間：{new Date(meta.survey.start_at).toLocaleString('ja-JP')} 〜{' '}
+        {new Date(meta.survey.end_at).toLocaleString('ja-JP')}
       </p>
       <SurveyForm surveyCode={surveyCode} meta={meta} />
     </main>
