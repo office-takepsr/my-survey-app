@@ -9,24 +9,29 @@ export default async function Page({
 }) {
   const { surveyCode } = await params;
 
-  // ❌ APIをfetchするのをやめる
-  // ✅ 直接DBから取得する
-  const { data: survey, error } = await supabaseAdmin
-    .from('surveys')
-    .select('*')
-    .eq('code', surveyCode)
-    .single();
+// APIのレスポンス形式に合わせて meta オブジェクトを作成
+  // Date型が含まれているとクライアントに渡す際にクラッシュするため、文字列に変換する
+  const meta = {
+    survey: {
+      ...survey,
+      start_at: new Date(survey.start_at).toISOString(),
+      end_at: new Date(survey.end_at).toISOString(),
+    }
+  };
 
-  // エラーハンドリング
-  if (error || !survey) {
-    const msg = error ? '読み込みに失敗しました' : 'サーベイが見つかりません';
-    return (
-      <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-        <h1>サーベイ回答</h1>
-        <p>{msg}</p>
-      </main>
-    );
-  }
+  return (
+    <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
+      <h1>{survey.name ?? 'サーベイ回答'}</h1>
+      {/* ここでも Date に変換して表示 */}
+      <p style={{ color: '#555' }}>
+        実施期間：{new Date(survey.start_at).toLocaleString('ja-JP')} 〜{' '}
+        {new Date(survey.end_at).toLocaleString('ja-JP')}
+      </p>
+      {/* プレーンなオブジェクトになった meta を渡す */}
+      <SurveyForm surveyCode={surveyCode} meta={meta} />
+    </main>
+  );
+}
 
   // APIのレスポンス形式に合わせて meta オブジェクトを模倣
   const meta = { survey };
