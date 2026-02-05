@@ -1,4 +1,6 @@
 import SurveyForm from './SurveyForm';
+import { supabaseAdmin } from '@/lib/supabaseAdmin'; // supabaseAdminをインポート
+import { notFound } from 'next/navigation';
 
 export default async function Page({
   params,
@@ -7,15 +9,17 @@ export default async function Page({
 }) {
   const { surveyCode } = await params;
 
-  // サーバ側でmetaを取得（同一ホスト内APIを叩く）
-  // 注意：デプロイ環境により絶対URLが必要な場合があります。
-  // その場合は NEXT_PUBLIC_SITE_URL を使う実装に変えます。
-  const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/surveys/${surveyCode}/meta`, {
-    cache: 'no-store',
-  });
+  // ❌ APIをfetchするのをやめる
+  // ✅ 直接DBから取得する
+  const { data: survey, error } = await supabaseAdmin
+    .from('surveys')
+    .select('*')
+    .eq('code', surveyCode)
+    .single();
 
-  if (!res.ok) {
-    const msg = res.status === 404 ? 'サーベイが見つかりません' : '読み込みに失敗しました';
+  // エラーハンドリング
+  if (error || !survey) {
+    const msg = error ? '読み込みに失敗しました' : 'サーベイが見つかりません';
     return (
       <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
         <h1>サーベイ回答</h1>
@@ -24,14 +28,15 @@ export default async function Page({
     );
   }
 
-  const meta = await res.json();
+  // APIのレスポンス形式に合わせて meta オブジェクトを模倣
+  const meta = { survey };
 
   return (
     <main style={{ maxWidth: 900, margin: '24px auto', padding: 16 }}>
-      <h1>{meta.survey?.name ?? 'サーベイ回答'}</h1>
+      <h1>{survey.name ?? 'サーベイ回答'}</h1>
       <p style={{ color: '#555' }}>
-        実施期間：{new Date(meta.survey.start_at).toLocaleString('ja-JP')} 〜{' '}
-        {new Date(meta.survey.end_at).toLocaleString('ja-JP')}
+        実施期間：{new Date(survey.start_at).toLocaleString('ja-JP')} 〜{' '}
+        {new Date(survey.end_at).toLocaleString('ja-JP')}
       </p>
       <SurveyForm surveyCode={surveyCode} meta={meta} />
     </main>
