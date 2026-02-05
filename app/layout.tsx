@@ -1,10 +1,11 @@
-"use client";
+import '@/styles/globals.css';
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export const metadata = {
+  title: 'Survey App',
+  description: 'Engagement survey form'
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
       <body>{children}</body>
