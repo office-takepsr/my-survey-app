@@ -1,182 +1,164 @@
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
-type Gender = '未回答' | '男性' | '女性' | 'その他' | '回答しない';
-type AgeBand = '未回答' | '〜20代' | '30代' | '40代' | '50代' | '60代〜';
-
-type SubmitBody = {
-  employeeCode: string;           // 社員ID（英数字）
-  departmentName: string;         // 部署名（管理部/営業部/技術部）
-  gender?: Gender;                // 任意
-  ageBand?: AgeBand;              // 任意
-  answers: Record<string, number>;// { "A-1": 1..6, ... }
+// ========== 型（必要最低限） ==========
+type ResponseItemInput = {
+  question_code: string; // "A-1", "F-3" など
+  raw_score: number;     // 1..6
 };
 
-const EMPLOYEE_CODE_RE = /^[A-Za-z0-9]{3,20}$/;
+type SubmitPayload = {
+  survey_id: string;        // UUID想定
+  employee_id: string;      // 社員ID（文字列でも可）
+  department_id?: string;   // 任意（部署を保存するなら）
+  // 任意属性を保存するならここに追加（gender, ageなど）
+  items: ResponseItemInput[];
+};
 
-function normalizeEmployeeCode(s: string) {
-  return s.trim().toUpperCase();
+// ========== ユーティリティ ==========
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim().length > 0;
 }
 
-function assertScore(n: unknown) {
-  return Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 6;
+function isIntInRange(v: unknown, min: number, max: number): v is number {
+  return Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
 }
 
-export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ surveyCode: string }> }
-) {
-  const { surveyCode } = await params;
+function calcScoredScore(questionCode: string, raw: number) {
+  // 例: F尺度だけ逆転 (7 - raw)。コード体系が "F-1" など前提
+  const isF = questionCode.toUpperCase().startsWith("F-");
+  return isF ? 7 - raw : raw;
+}
 
-  let body: SubmitBody;
+// Postgresの unique violation
+function isUniqueViolation(err: any): boolean {
+  // Postgres: 23505 = unique_violation
+  return err?.code === "23505";
+}
+
+export async function POST(req: Request) {
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'JSONが不正です' }, { status: 400 });
-  }
+    // 1) JSONパース
+    const body = (await req.json()) as Partial<SubmitPayload>;
 
-  // ===== 入力バリデーション =====
-  const employeeCode = normalizeEmployeeCode(body.employeeCode ?? '');
-  if (!EMPLOYEE_CODE_RE.test(employeeCode)) {
+    // 2) 入力チェック（必須）
+    if (!isNonEmptyString(body.survey_id)) {
+      return NextResponse.json({ error: "survey_id は必須です" }, { status: 400 });
+    }
+    if (!isNonEmptyString(body.employee_id)) {
+      return NextResponse.json({ error: "employee_id（社員ID）は必須です" }, { status: 400 });
+    }
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      return NextResponse.json({ error: "items は1件以上必要です" }, { status: 400 });
+    }
+
+    // itemsのチェック（コード・スコア範囲）
+    for (const [i, it] of body.items.entries()) {
+      if (!isNonEmptyString(it?.question_code)) {
+        return NextResponse.json(
+          { error: `items[${i}].question_code が不正です` },
+          { status: 400 }
+        );
+      }
+      if (!isIntInRange(it?.raw_score, 1, 6)) {
+        return NextResponse.json(
+          { error: `items[${i}].raw_score は1〜6の整数である必要があります` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 3) survey期間チェック
+    // surveys: { id, starts_at, ends_at, status } を想定（列名はあなたのDBに合わせて変更）
+    const now = new Date();
+
+    const { data: survey, error: surveyErr } = await supabaseAdmin
+      .from("surveys")
+      .select("id, starts_at, ends_at, status")
+      .eq("id", body.survey_id)
+      .single();
+
+    if (surveyErr || !survey) {
+      return NextResponse.json({ error: "survey が見つかりません" }, { status: 404 });
+    }
+
+    // statusの考え方は自由。例として "open" のみ受付
+    if (survey.status && survey.status !== "open") {
+      return NextResponse.json({ error: "このsurveyは回答受付中ではありません" }, { status: 400 });
+    }
+
+    const startsAt = survey.starts_at ? new Date(survey.starts_at) : null;
+    const endsAt = survey.ends_at ? new Date(survey.ends_at) : null;
+
+    if (startsAt && now < startsAt) {
+      return NextResponse.json({ error: "回答期間前です" }, { status: 400 });
+    }
+    if (endsAt && now > endsAt) {
+      return NextResponse.json({ error: "回答期間が終了しています" }, { status: 400 });
+    }
+
+    // 4) responses（ヘッダ）insert
+    // responses: { id, survey_id, employee_id, answered_at } を想定
+    // ※ ここで (survey_id, employee_id) UNIQUE が効いて重複はDBが弾く
+    const { data: responseRow, error: responseErr } = await supabaseAdmin
+      .from("responses")
+      .insert({
+        survey_id: body.survey_id,
+        employee_id: body.employee_id,
+        answered_at: now.toISOString(),
+        // department_id を responses に持たせるならここに入れる
+        department_id: body.department_id ?? null,
+      })
+      .select("id")
+      .single();
+
+    if (responseErr) {
+      // 5) 重複エラー処理（ユニーク制約）
+      if (isUniqueViolation(responseErr)) {
+        return NextResponse.json(
+          { error: "このsurveyでは既に回答済みです" },
+          { status: 409 }
+        );
+      }
+      // その他DBエラー
+      return NextResponse.json(
+        { error: "responses 保存に失敗しました", detail: responseErr.message },
+        { status: 500 }
+      );
+    }
+
+    const responseId = responseRow.id as string;
+
+    // 6) response_items 作成（F逆転 7-raw を計算して scored_score に保存）
+    const itemsToInsert = body.items.map((it) => ({
+      response_id: responseId,
+      question_code: it.question_code,
+      raw_score: it.raw_score,
+      scored_score: calcScoredScore(it.question_code, it.raw_score),
+    }));
+
+    const { error: itemsErr } = await supabaseAdmin
+      .from("response_items")
+      .insert(itemsToInsert);
+
+    if (itemsErr) {
+      // ここで失敗するとヘッダだけ残る可能性がある（MVPなら許容/後で掃除）
+      // 本番で堅くするなら「DB関数（RPC）+ トランザクション」で一括処理が推奨
+      return NextResponse.json(
+        { error: "response_items 保存に失敗しました", detail: itemsErr.message },
+        { status: 500 }
+      );
+    }
+
+    // 7) 成功レスポンス
     return NextResponse.json(
-      { error: '社員IDは半角英数字3〜20文字で入力してください' },
+      { ok: true, response_id: responseId },
+      { status: 200 }
+    );
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: "不正なリクエストです", detail: e?.message ?? String(e) },
       { status: 400 }
     );
   }
-
-  if (!body.departmentName) {
-    return NextResponse.json({ error: '部署は必須です' }, { status: 400 });
-  }
-
-  if (!body.answers || typeof body.answers !== 'object') {
-    return NextResponse.json({ error: 'answersが不正です' }, { status: 400 });
-  }
-
-  // ===== 1) survey取得（code→id、期間チェック）=====
-  const { data: survey, error: surveyErr } = await supabaseAdmin
-    .from('surveys')
-    .select('id, code, start_at, end_at, status')
-    .eq('code', surveyCode)
-    .single();
-
-  if (surveyErr || !survey) {
-    return NextResponse.json({ error: 'サーベイが見つかりません' }, { status: 404 });
-  }
-
-  const now = new Date();
-  const startAt = new Date(survey.start_at);
-  const endAt = new Date(survey.end_at);
-
-  if (survey.status !== 'open' || now < startAt || now > endAt) {
-    return NextResponse.json({ error: '回答期間外です' }, { status: 403 });
-  }
-
-  // ===== 2) 部署（name→id）=====
-  const { data: dept, error: deptErr } = await supabaseAdmin
-    .from('departments')
-    .select('id, name')
-    .eq('name', body.departmentName)
-    .eq('is_active', true)
-    .single();
-
-  if (deptErr || !dept) {
-    return NextResponse.json({ error: '部署が不正です' }, { status: 400 });
-  }
-
-  // ===== 3) questions取得（コード→id/scale/is_reverse）=====
-  const codes = Object.keys(body.answers);
-  if (codes.length === 0) {
-    return NextResponse.json({ error: '回答が空です' }, { status: 400 });
-  }
-
-  const { data: questions, error: qErr } = await supabaseAdmin
-    .from('questions')
-    .select('id, question_code, scale, is_reverse, is_active')
-    .in('question_code', codes);
-
-  if (qErr || !questions) {
-    return NextResponse.json({ error: '設問取得に失敗しました' }, { status: 500 });
-  }
-
-  // アクティブな設問のみ許可
-  const qMap = new Map(questions.filter(q => q.is_active).map(q => [q.question_code, q]));
-
-  // 送信された設問コードがDBに存在するかチェック
-  for (const code of codes) {
-    if (!qMap.has(code)) {
-      return NextResponse.json({ error: `不正な設問コード: ${code}` }, { status: 400 });
-    }
-    if (!assertScore(body.answers[code])) {
-      return NextResponse.json({ error: `不正な点数: ${code}` }, { status: 400 });
-    }
-  }
-
-  // ===== 4) employees upsert（社員IDで自動作成/更新）=====
-  // ここは “upsertでOK” とのことなので、回答のたびに最新属性で更新して構いません。
-  const gender = body.gender ?? null;
-  const ageBand = body.ageBand ?? null;
-
-  const { data: upsertedEmployees, error: empErr } = await supabaseAdmin
-    .from('employees')
-    .upsert(
-      {
-        employee_code: employeeCode,
-        department_id: dept.id,
-        gender: gender && gender !== '未回答' ? gender : null,
-        age_band: ageBand && ageBand !== '未回答' ? ageBand : null,
-      },
-      { onConflict: 'employee_code' }
-    )
-    .select('id, employee_code')
-    .limit(1);
-
-  if (empErr || !upsertedEmployees || upsertedEmployees.length === 0) {
-    return NextResponse.json({ error: '社員情報の登録に失敗しました' }, { status: 500 });
-  }
-
-  const employeeId = upsertedEmployees[0].id;
-
-  // ===== 5) responses insert（再回答不可）=====
-  // UNIQUE(survey_id, employee_id) により、2回目はDBが拒否します。
-  const { data: responseRow, error: respErr } = await supabaseAdmin
-    .from('responses')
-    .insert({ survey_id: survey.id, employee_id: employeeId })
-    .select('id')
-    .single();
-
-  if (respErr || !responseRow) {
-    // 重複（既回答）っぽいケースをユーザー向けに返す（DBメッセージは露出しない）
-    return NextResponse.json(
-      { error: 'この社員IDは今回のサーベイで回答済みのため、再回答できません' },
-      { status: 409 }
-    );
-  }
-
-  const responseId = responseRow.id;
-
-  // ===== 6) response_items bulk insert（Fは逆転）=====
-  const items = codes.map((code) => {
-    const q = qMap.get(code)!;
-    const raw = body.answers[code];
-    const scored = q.is_reverse ? (7 - raw) : raw;
-
-    return {
-      response_id: responseId,
-      question_id: q.id,
-      raw_score: raw,
-      scored_score: scored,
-    };
-  });
-
-  const { error: itemsErr } = await supabaseAdmin
-    .from('response_items')
-    .insert(items);
-
-  if (itemsErr) {
-    // 明細が入らなかったらヘッダだけ残るのが嫌なので、削除して整合性を守る（簡易ロールバック）
-    await supabaseAdmin.from('responses').delete().eq('id', responseId);
-    return NextResponse.json({ error: '回答保存に失敗しました' }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true }, { status: 200 });
 }
